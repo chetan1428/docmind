@@ -1,14 +1,95 @@
-# Learnings
+# DocMind DevOps Learnings
 
-- Docker Desktop must be running, else: cannot connect to docker.sock
-- macOS system python is 3.9; LangChain 1.x needs 3.10+ (used conda env with 3.12)
-- zsh does not treat # as a comment when pasting; apostrophes open a quote> prompt
-- Homebrew install must finish fully; then run brew shellenv
-<<<<<<< HEAD
-- Note from branch A
-=======
-- Note from branch B
->>>>>>> feature/b
+## Phase 0: Local setup on macOS (Apple Silicon)
+
+### Problem: pip could not find langchain-core>=1.0
+- Cause: venv used macOS built-in Python 3.9 (pip 21.2.4). LangChain 1.x needs Python 3.10+.
+- Fix: `conda create -n docmind python=3.12 -y` then `conda activate docmind`
+- Check: `python --version` shows 3.12.x
+
+### Problem: tests ran from /opt/anaconda3 instead of my env
+- Cause: Anaconda (base) was active, not the project env.
+- Fix: `conda activate docmind`, run `python -m pytest -q`
+
+### Problem: `python: command not found` after `conda deactivate`
+- Cause: macOS only has `python3`. No env active.
+- Fix: `conda activate docmind`
+
+### Problem: `conda: error: invalid choice: 'conda'`
+- Cause: typed `conda` twice on one line.
+- Fix: run exactly `conda activate docmind`
+
+### Problem: terminal stuck at `quote>`
+- Cause: zsh does not treat `#` as a comment when pasting; an apostrophe opened a quote.
+- Fix: Ctrl+C, paste without comments.
+- Permanent: `echo 'setopt interactivecomments' >> ~/.zshrc && source ~/.zshrc`
+
+### Problem: `brew: command not found` after install
+- Cause: install was still downloading or stopped early.
+- Fix: rerun installer, wait for "Installation successful!" (or .pkg from github.com/Homebrew/brew/releases)
+- Then: `eval "$(/opt/homebrew/bin/brew shellenv)"`
+- /opt/homebrew = Apple Silicon (arm64) -> for AWS build with `--platform linux/amd64`
+
+### Problem: brew cask docker "App already exists"
+- Docker Desktop was already installed. Just `open -a Docker`.
+
+### Problem: `failed to connect to the docker API ... docker.sock`
+- Cause: Docker Desktop not running.
+- Fix: `open -a Docker`, wait for whale icon, check `docker ps`
+
+### Problem: API "Could not connect to the database"
+- Cause: Postgres container not running (Docker was off). App retries 60s then exits.
+- Fix: start Docker + pg container, `docker exec pg pg_isready -U docmind` before uvicorn
+- Debug: `docker ps -a`, `docker logs pg`
+
+### Not a problem: `GET /favicon.ico 404`
+- Browser asks for a tab icon; app has none. Harmless.
+
+### Problem: hidden files (.env, .gitignore) lost after moving folder
+- Cause: `ls` and `mv *` skip dot-files.
+- Fix: recreated them. Use `ls -a`; copy with `rsync -a src/ dest/`
+
+### Problem: `echo "x" >> .gitignore` created a new one-line .gitignore
+- `>>` creates the file if missing. Always `cat .gitignore` and confirm `.env` is listed BEFORE `git add .`
+
+### Other notes
+- No spaces in project paths -> moved to ~/projects/docmind
+- A moved venv breaks; recreate it
+- dump.rdb = Redis data file; never commit (in .gitignore)
+- macOS RQ worker objc fork crash -> `export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES`
+
+## Phase 1: Git + GitHub
+
+### Setup
+- `git config --global user.name / user.email / init.defaultBranch main`
+- `brew install gh` + `gh auth login`
+- `gh repo create docmind --public --source=. --remote=origin --push`
+
+### Branch strategy
+- main = protected, releases only (PR required)
+- dev = integration
+- feature/* = one branch per change -> PR into dev
+- release = PR dev -> main, then annotated tag
+
+### Daily loop
+1. `git checkout dev && git pull`
+2. `git checkout -b feature/<name>`
+3. edit -> `git add` -> `git commit -m "type: msg"`
+4. `git push -u origin feature/<name>`
+5. `gh pr create --base dev --title "..." --body "..."`
+6. `gh pr merge --merge --delete-branch`
+7. `git checkout dev && git pull`
+
+### Concepts
+- Conventional commits: feat / fix / docs / ci / chore / test / refactor
+- Fast-forward merge = no merge commit; merge commit = joins two histories
+- Conflict: edit file, remove `<<<<<<<` `=======` `>>>>>>>`, then `git add` + `git commit`
+- `git branch -d` "not found" = already deleted by `--delete-branch`
+- `git fetch --prune` removes refs to branches deleted on GitHub
+- Annotated tag: `git tag -a v0.1.0 -m "..."` + `git push origin v0.1.0`
+- `gh release create v0.1.0 --title "v0.1.0" --notes "..."`
+- `git reset --hard origin/main` discards local commits (dangerous)
+- `git log --oneline --graph --decorate -10`
 
 ## Phase 2: Docker
 
