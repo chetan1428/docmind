@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DocMind</title>
+<style>
+  :root {
+    --bg: #f6f5f1; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6a65;
+    --line: #e3e1da; --accent: #2f5d50; --accent-ink: #ffffff; --warn: #a14a2a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #151614; --panel: #1e201d; --ink: #ecebe6; --muted: #9a9a92;
+            --line: #2e312c; --accent: #7fb8a4; --accent-ink: #0f1a16; --warn: #e08a68; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 26px; margin: 0; letter-spacing: -0.02em; }
+  .sub { color: var(--muted); margin: 4px 0 28px; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+            padding: 18px; margin-bottom: 18px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 12px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; }
+  input[type=text] { flex: 1; min-width: 200px; padding: 10px 12px; border-radius: 8px;
+                     border: 1px solid var(--line); background: var(--bg); color: var(--ink); font: inherit; }
+  button { padding: 10px 16px; border-radius: 8px; border: 0; background: var(--accent);
+           color: var(--accent-ink); font: inherit; font-weight: 600; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--line); padding: 4px 10px; font-weight: 400; }
+  ul { list-style: none; padding: 0; margin: 12px 0 0; }
+  li { display: flex; justify-content: space-between; align-items: center; gap: 10px;
+       padding: 8px 0; border-top: 1px solid var(--line); }
+  .badge { font-size: 12px; padding: 2px 8px; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); }
+  .badge.ready { color: var(--accent); border-color: var(--accent); }
+  .badge.failed { color: var(--warn); border-color: var(--warn); }
+  .answer { white-space: pre-wrap; margin-top: 14px; font-size: 16px; }
+  .meta { color: var(--muted); font-size: 13px; margin-top: 6px; }
+  details { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; }
+  summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+  .src { font-size: 13px; color: var(--muted); margin: 8px 0; }
+  .err { color: var(--warn); margin-top: 8px; }
+  footer { color: var(--muted); font-size: 12px; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <h1>DocMind</h1>
+  <p class="sub">Upload documents, then ask questions about them.</p>
+
+  <section>
+    <h2>1 · Documents</h2>
+    <div class="row">
+      <input type="file" id="file" accept=".txt,.md,.pdf">
+      <button id="uploadBtn">Upload</button>
+    </div>
+    <div id="uploadErr" class="err"></div>
+    <ul id="docs"></ul>
+  </section>
+
+  <section>
+    <h2>2 · Ask</h2>
+    <form id="askForm" class="row">
+      <input type="text" id="question" placeholder="e.g. What is a Kubernetes readiness probe?" autocomplete="off">
+      <button id="askBtn" type="submit">Ask</button>
+    </form>
+    <div id="askErr" class="err"></div>
+    <div id="answer" class="answer"></div>
+    <div id="meta" class="meta"></div>
+    <div id="sources"></div>
+  </section>
+
+  <footer id="footer">connecting…</footer>
+</main>
+
+<script>
+// Relative URLs: works when served by FastAPI, or behind nginx / an Ingress that routes /api to the backend.
+const API = window.DOCMIND_API_BASE || "";
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+async function api(path, opts = {}) {
+  const res = await fetch(API + path, opts);
+  if (res.status === 204) return null;
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.detail ? (typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail)) : res.statusText);
+  return body;
+}
+
+async function loadDocs() {
+  try {
+    const docs = await api("/api/documents");
+    $("docs").innerHTML = docs.length ? docs.map(d => `
+      <li><span>${esc(d.filename)} <span class="meta">· ${d.num_chunks} chunks</span></span>
+          <span><span class="badge ${d.status}" title="${esc(d.error || "")}">${d.status}</span>
+          <button class="ghost" onclick="delDoc(${d.id})">delete</button></span></li>`).join("")
+      : `<li><span class="meta">No documents yet.</span></li>`;
+    if (docs.some(d => d.status === "queued" || d.status === "processing")) setTimeout(loadDocs, 1500);
+  } catch (e) { $("docs").innerHTML = `<li class="err">${esc(e.message)}</li>`; }
+}
+
+async function delDoc(id) { await api(`/api/documents/${id}`, { method: "DELETE" }); loadDocs(); }
+
+$("uploadBtn").onclick = async () => {
+  const f = $("file").files[0];
+  $("uploadErr").textContent = "";
+  if (!f) { $("uploadErr").textContent = "Choose a file first."; return; }
+  const fd = new FormData(); fd.append("file", f);
+  $("uploadBtn").disabled = true;
+  try { await api("/api/documents", { method: "POST", body: fd }); $("file").value = ""; loadDocs(); }
+  catch (e) { $("uploadErr").textContent = e.message; }
+  finally { $("uploadBtn").disabled = false; }
+};
+
+$("askForm").onsubmit = async (ev) => {
+  ev.preventDefault();
+  const q = $("question").value.trim();
+  if (!q) return;
+  $("askErr").textContent = ""; $("answer").textContent = "Thinking…"; $("meta").textContent = ""; $("sources").innerHTML = "";
+  $("askBtn").disabled = true;
+  try {
+    const r = await api("/api/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: q }) });
+    $("answer").textContent = r.answer;
+    const rewritten = r.search_query && r.search_query !== q ? ` · searched: “${r.search_query}”` : "";
+    $("meta").textContent = `${r.steps.join(" → ")}${rewritten} · ${r.latency_ms} ms${r.cached ? " · from cache" : ""}`;
+    if (r.sources.length) $("sources").innerHTML = `<details><summary>${r.sources.length} sources</summary>${
+      r.sources.map((s, i) => `<div class="src"><b>[${i + 1}] ${esc(s.filename)}</b> · score ${s.score}<br>${esc(s.text.slice(0, 300))}…</div>`).join("")}</details>`;
+  } catch (e) { $("answer").textContent = ""; $("askErr").textContent = e.message; }
+  finally { $("askBtn").disabled = false; }
+};
+
+api("/health").then(h => $("footer").textContent = `DocMind v${h.version}`).catch(() => $("footer").textContent = "API unreachable");
+loadDocs();
+</script>
+</body>
+</html>
