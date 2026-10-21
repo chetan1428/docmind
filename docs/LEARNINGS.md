@@ -140,3 +140,37 @@
 - Why does the worker reuse the API image?
 - Why pass the key at runtime?
 - Container vs volume?
+
+## Phase 3: Docker Compose + Docker Hub
+
+### docker-compose.yml (project root)
+- 4 services: postgres, redis, api, worker
+- Compose creates the network automatically (docmind_default); services reach each other by service name
+- Named volume `pgdata` -> actual name `docmind_pgdata` (project name prefix)
+- `env_file: .env` loads secrets; `environment:` overrides individual values (DATABASE_URL, REDIS_URL point to service names)
+- `depends_on: condition: service_healthy` waits for postgres/redis healthchecks before starting api/worker
+- YAML anchor `x-app: &app` + `<<: *app` = shared config for api and worker, no copy-paste
+- `restart: unless-stopped` = auto-restart on crash
+
+### Commands
+- `docker compose config` validate + show merged config (prints secrets, never share output)
+- `docker compose up -d --build` build + start all
+- `docker compose ps` / `logs -f [service]` / `exec <service> sh`
+- `docker compose restart api` / `stop` / `start`
+- `docker compose up -d --build api` redeploy only the api after code change
+- `docker compose up -d --scale worker=3` scale workers (api cannot scale this way: port 8000 conflict)
+- `docker compose down` removes containers + network, KEEPS volumes
+- `docker compose down -v` ALSO DELETES VOLUMES = database wiped
+
+### Lessons
+- restart policy restarts CRASHED containers, not ones I stopped/killed manually
+- "service is not running" on exec -> `docker compose up -d <service>` first
+- Data survives `down` / `up` because of the named volume
+- Separate worker service = can scale background jobs independently
+
+### Docker Hub
+- Login with a Personal Access Token, not the password: `docker login -u chetansatkar45`
+- Mac is arm64, cloud is usually amd64 -> multi-arch build:
+  `docker buildx build --platform linux/amd64,linux/arm64 --build-arg APP_VERSION=$SHA -t chetansatkar45/docmind:$SHA -t chetansatkar45/docmind:latest --push .`
+- Verify: `docker buildx imagetools inspect chetansatkar45/docmind:$SHA`
+- Tag with git SHA = know exactly which code is running + easy rollback. `latest` alone is ambiguous.
