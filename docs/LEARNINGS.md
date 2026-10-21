@@ -174,3 +174,48 @@
   `docker buildx build --platform linux/amd64,linux/arm64 --build-arg APP_VERSION=$SHA -t chetansatkar45/docmind:$SHA -t chetansatkar45/docmind:latest --push .`
 - Verify: `docker buildx imagetools inspect chetansatkar45/docmind:$SHA`
 - Tag with git SHA = know exactly which code is running + easy rollback. `latest` alone is ambiguous.
+
+## Phase 4: CI with GitHub Actions
+
+### File: .github/workflows/ci.yml
+- Triggers: pull_request + push on dev/main, workflow_dispatch = manual button
+- Jobs chained with `needs:` -> lint-and-test -> build-and-scan -> push (main only)
+- `permissions: contents: read` = least privilege
+- `concurrency` cancels outdated runs on the same branch
+- pip cache + Docker layer cache (type=gha) = fast reruns
+- `services:` gives the job real Postgres/Redis containers (like compose)
+- Smoke test runs the BUILT IMAGE: upload doc, wait for ready, ask a question (LLM_PROVIDER=extractive, no key needed)
+- `if: failure()` step prints container logs only when something broke
+- Trivy scan fails on CRITICAL fixable CVEs (exit-code 1); "0" = report only
+- push job only on main: multi-arch (QEMU + buildx), tags = full git SHA + latest
+
+### Secrets
+- `gh secret set NAME` stores encrypted secrets; values never shown again
+- Used as ${{ secrets.NAME }}, masked as *** in logs
+- PRs never push images, and CI needs no Groq key
+
+### Commands
+- `gh pr checks --watch` watch a PR's checks
+- `gh run list` / `gh run watch` / `gh run view --log-failed`
+- `actionlint` validates workflow YAML locally
+
+### Branch protection
+- Require status checks lint-and-test + build-and-scan on main AND dev
+- Checks appear in the settings list only after they ran once
+
+### Break-it results
+- Unused import -> lint fails -> build skipped -> merge blocked
+- Broken test -> pytest fails
+- Dockerfile on wrong port -> lint/tests pass but smoke test fails (test the image, not just the code)
+
+### Supply-chain security
+- March 2026: attackers force-pushed 76/77 trivy-action tags to credential-stealing code
+- Tags are mutable, SHAs are not -> pin third-party actions to full commit SHA with a version comment
+- Dependabot (.github/dependabot.yml) proposes updates for actions and pip weekly
+
+### Interview answers (write in my own words)
+- CI vs CD?
+- Why run a smoke test on the image if unit tests pass?
+- Why does only main push images?
+- How do secrets reach a workflow without being in the code?
+- Why pin actions to a SHA?
