@@ -144,3 +144,14 @@ frontend/index.html
 samples/         a doc to test with
 tests/
 ```
+
+## Run with Docker Compose
+
+```bash
+cp .env.example .env    # add your GROQ_API_KEY
+docker compose up -d --build
+open http://localhost:8000
+docker compose down     # keeps data; add -v to wipe it
+```
+
+Prebuilt multi-arch image: `docker pull chetansatkar45/docmind:latest`
