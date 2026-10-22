@@ -43,6 +43,15 @@ jobs:
       - name: Unit tests
         run: pytest -q
 
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Lint Helm chart
+        run: |
+          helm lint helm/docmind --set image.tag=ci
+          helm lint helm/docmind -f helm/docmind/values-dev.yaml --set image.tag=ci
+          helm lint helm/docmind -f helm/docmind/values-prod.yaml --set image.tag=ci
+
   build-and-scan:
     needs: lint-and-test
     runs-on: ubuntu-latest
@@ -86,16 +95,16 @@ jobs:
           RD: redis://localhost:6379/0
         run: |
           docker run -d --name api --network host \
-            -e DATABASE_URL=$DB -e REDIS_URL=$RD -e LLM_PROVIDER=extractive docmind:ci
+            -e DATABASE_URL="$DB" -e REDIS_URL="$RD" -e LLM_PROVIDER=extractive docmind:ci
           docker run -d --name worker --network host \
-            -e DATABASE_URL=$DB -e REDIS_URL=$RD -e LLM_PROVIDER=extractive docmind:ci python -m app.worker
+            -e DATABASE_URL="$DB" -e REDIS_URL="$RD" -e LLM_PROVIDER=extractive docmind:ci python -m app.worker
 
           curl -fsS --retry 30 --retry-delay 2 --retry-all-errors localhost:8000/ready
           curl -fsS localhost:8000/health | grep -q '${{ github.sha }}'
 
           ID=$(curl -fsS -F file=@samples/kubernetes-basics.md localhost:8000/api/documents | jq -r .id)
-          for i in $(seq 1 30); do
-            STATUS=$(curl -fsS localhost:8000/api/documents/$ID | jq -r .status)
+          for _ in $(seq 1 30); do
+            STATUS=$(curl -fsS localhost:8000/api/documents/"$ID" | jq -r .status)
             [ "$STATUS" = "ready" ] && break
             sleep 1
           done

@@ -1,0 +1,65 @@
+image:
+  repository: chetansatkar45/docmind
+  tag: ""
+  pullPolicy: IfNotPresent
+
+existingSecret: docmind-secrets
+
+redisUrl: redis://redis:6379/0
+
+config:
+  LLM_PROVIDER: groq
+  GROQ_MODEL: openai/gpt-oss-120b
+  GROQ_FAST_MODEL: openai/gpt-oss-20b
+  MAX_QUERY_REWRITES: "1"
+  EMBEDDING_PROVIDER: hash
+  LOG_LEVEL: INFO
+
+api:
+  replicas: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 5
+    targetCPUUtilization: 60
+
+worker:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+
+postgres:
+  enabled: true
+  image: pgvector/pgvector:pg16
+  storage: 1Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+
+redis:
+  enabled: true
+  image: redis:7
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+
+gateway:
+  enabled: true
+  className: eg
+  hostname: docmind.localhost
