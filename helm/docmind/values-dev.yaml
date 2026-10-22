@@ -1,0 +1,6 @@
+api:
+  replicas: 1
+config:
+  LOG_LEVEL: DEBUG
+gateway:
+  hostname: docmind-dev.localhost
