@@ -63,3 +63,5 @@ gateway:
   enabled: true
   className: eg
   hostname: docmind.localhost
+
+imagePullSecrets: []
