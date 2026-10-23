@@ -1,0 +1,13 @@
+image:
+  repository: 975739936766.dkr.ecr.ap-south-1.amazonaws.com/docmind
+imagePullSecrets:
+  - name: ecr-pull
+postgres:
+  enabled: false
+api:
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 4
+config:
+  LOG_LEVEL: INFO
