@@ -1,8 +1,3 @@
-import {
-  to = aws_ecr_repository.docmind
-  id = "docmind"
-}
-
 resource "aws_ecr_repository" "docmind" {
   name                 = "docmind"
   image_tag_mutability = "MUTABLE"
