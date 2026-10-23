@@ -171,7 +171,7 @@ jobs:
       ECR_REPO: 975739936766.dkr.ecr.ap-south-1.amazonaws.com/docmind
     steps:
       - name: Get AWS credentials via OIDC (no stored keys)
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ap-south-1
