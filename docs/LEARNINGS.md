@@ -276,3 +276,50 @@
 4. helm install metrics-server ... --set "args={--kubelet-insecure-tls}"
 5. kubectl create ns + secret docmind-secrets (POSTGRES_PASSWORD, DATABASE_URL, GROQ_API_KEY)
 6. helm install docmind helm/docmind -n <ns> -f values-<env>.yaml --set image.tag=<sha>
+
+## Phase 6: AWS (Free plan credits)
+
+### Account safety
+- Free plan: $100 + up to $100 credits for activities, 6 months, no charges
+- Root = MFA only, never access keys; daily work as IAM user chetan-admin (group admins, MFA)
+- Zero-spend budget alert on day 1 (also earned $20 credit)
+- Region ap-south-1 (Mumbai); billing pages always show us-east-1 (global)
+- CLI keys in ~/.aws/credentials (never in repo); describe access keys; rotate ~90 days
+- IAM group names: letters/numbers/+=,.@_- only; paste can add invisible chars -> type by hand
+
+### What I built
+- ECR repo docmind (scan on push); copied the multi-arch image with `docker buildx imagetools create`
+- EC2 (free-tier-eligible type) running k3s, Ubuntu 24.04 AMI from SSM Parameter Store
+- Security group: 22 from my IP /32 only, 80 from anywhere, 6443 NEVER open -> SSH tunnel
+- Elastic IP 43.204.223.233 (fixed address; costs a little; release at teardown)
+- Node IAM role: ECR read-only + SSM managed instance (instance profile, IMDSv2 required)
+- RDS Postgres 16 db.t4g.micro, private, SG source = k3s SG (not IP), sslmode=require, pgvector works
+- Helm: same chart, values-aws.yaml (postgres.enabled=false, imagePullSecrets ecr-pull, HPA)
+- Envoy Gateway on k3s: ServiceLB gives the Gateway the node IP -> PROGRAMMED True
+- Public URL via nip.io: http://43.204.223.233.nip.io
+
+### Keyless CD
+- GitHub OIDC provider + role github-docmind-deploy
+- Trust condition sub = repo:chetan1428/docmind:environment:aws (only that repo + environment)
+- Permissions: push to one ECR repo, SendCommand to one instance (least privilege)
+- GitHub environment `aws`: required reviewer (me) + only main branch; vars AWS_ROLE_ARN, APP_URL
+- Job: configure-aws-credentials (1h creds) -> copy image to ECR -> SSM Run Command runs deploy/aws-deploy.sh -> verify /health shows the SHA
+- deploy script: set -euo pipefail, IMDSv2 public IP, refresh ECR pull secret with node role, helm upgrade --install --wait
+
+### Errors I hit and fixes
+- SSH timed out -> instance stopped (new IP) or my home IP changed (SG rule)
+- Same SSH fingerprint on new IP = same server (safe); different fingerprint = stop
+- 127.0.0.1:6443 refused -> tunnel not running; use -o ServerAliveInterval=30 -o ExitOnForwardFailure=yes
+- `ubuntu@$IP]` stray bracket; PASTE_IP / <placeholders> typed literally
+- RDS start error "not in stopped state" -> it was already starting
+- SSM exit 127 "deploy/aws-deploy.sh: No such file" -> script was not committed+pushed; check `git ls-tree -r --name-only origin/<branch>`
+- GitHub env variables 404 -> environment didn't exist yet (gh api -X PUT .../environments/aws)
+- JMESPath: backticks = JSON literal (number), single quotes = string
+- `<<'EOF'` literal vs `<<EOF` expands $VARS
+- YAML pasted into zsh -> "command not found: uses:" (YAML goes in files)
+
+### Cost habits
+- End of session: helm uninstall (public app offline), stop EC2, stop RDS
+- Stopped RDS auto-starts after 7 days
+- Elastic IP costs even when the instance is stopped
+- Check Billing -> Credits weekly
