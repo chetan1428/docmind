@@ -13,7 +13,10 @@ data "aws_iam_policy_document" "github_trust" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repo}:environment:aws"]
+      values = [
+        # GitHub immutable subject (owner@id/repo@id) - survives renames, cannot be hijacked
+        "repo:chetan1428@207138788/docmind@1427323298:environment:aws",
+      ]
     }
   }
 }
