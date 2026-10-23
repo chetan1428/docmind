@@ -11,7 +11,7 @@ COPY --from=builder /install /usr/local
 COPY app ./app
 COPY frontend ./frontend
 RUN useradd --uid 10001 --create-home appuser
-USER appuser
+USER 10001:10001
 ARG APP_VERSION=dev
 ENV APP_VERSION=${APP_VERSION}
 EXPOSE 8000

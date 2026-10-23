@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: docmind-config
+  labels:
+    {{- include "docmind.labels" . | nindent 4 }}
+data:
+  REDIS_URL: {{ .Values.redisUrl | quote }}
+  {{- range $key, $value := .Values.config }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}

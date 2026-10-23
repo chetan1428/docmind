@@ -174,3 +174,105 @@
   `docker buildx build --platform linux/amd64,linux/arm64 --build-arg APP_VERSION=$SHA -t chetansatkar45/docmind:$SHA -t chetansatkar45/docmind:latest --push .`
 - Verify: `docker buildx imagetools inspect chetansatkar45/docmind:$SHA`
 - Tag with git SHA = know exactly which code is running + easy rollback. `latest` alone is ambiguous.
+
+## Phase 4: CI with GitHub Actions
+
+### File: .github/workflows/ci.yml
+- Triggers: pull_request + push on dev/main, workflow_dispatch = manual button
+- Jobs chained with `needs:` -> lint-and-test -> build-and-scan -> push (main only)
+- `permissions: contents: read` = least privilege
+- `concurrency` cancels outdated runs on the same branch
+- pip cache + Docker layer cache (type=gha) = fast reruns
+- `services:` gives the job real Postgres/Redis containers (like compose)
+- Smoke test runs the BUILT IMAGE: upload doc, wait for ready, ask a question (LLM_PROVIDER=extractive, no key needed)
+- `if: failure()` step prints container logs only when something broke
+- Trivy scan fails on CRITICAL fixable CVEs (exit-code 1); "0" = report only
+- push job only on main: multi-arch (QEMU + buildx), tags = full git SHA + latest
+
+### Secrets
+- `gh secret set NAME` stores encrypted secrets; values never shown again
+- Used as ${{ secrets.NAME }}, masked as *** in logs
+- PRs never push images, and CI needs no Groq key
+
+### Commands
+- `gh pr checks --watch` watch a PR's checks
+- `gh run list` / `gh run watch` / `gh run view --log-failed`
+- `actionlint` validates workflow YAML locally
+
+### Branch protection
+- Require status checks lint-and-test + build-and-scan on main AND dev
+- Checks appear in the settings list only after they ran once
+
+### Break-it results
+- Unused import -> lint fails -> build skipped -> merge blocked
+- Broken test -> pytest fails
+- Dockerfile on wrong port -> lint/tests pass but smoke test fails (test the image, not just the code)
+
+### Supply-chain security
+- March 2026: attackers force-pushed 76/77 trivy-action tags to credential-stealing code
+- Tags are mutable, SHAs are not -> pin third-party actions to full commit SHA with a version comment
+- Dependabot (.github/dependabot.yml) proposes updates for actions and pip weekly
+
+### Interview answers (write in my own words)
+- CI vs CD?
+- Why run a smoke test on the image if unit tests pass?
+- Why does only main push images?
+- How do secrets reach a workflow without being in the code?
+- Why pin actions to a SHA?
+
+## Phase 5: Kubernetes (kind) + Gateway API + HPA + Helm
+
+### Cluster basics
+- kind = k8s nodes as Docker containers: `kind create cluster --config k8s/kind-config.yaml`
+- Docker Desktop needs >= 6 GB RAM
+- `kubectl config set-context --current --namespace=X` = default namespace
+
+### Errors I hit and fixes
+- "namespaces X not found" -> create the Namespace first
+- Secret created without -n landed in `default` -> pods only read Secrets in their own namespace
+- `@` in password broke DATABASE_URL ("failed to resolve host '12345@postgres'") -> URL-encode (%40) or `openssl rand -hex 16`
+- POSTGRES_PASSWORD only applies the first time the volume is initialized
+- CreateContainerConfigError "non-numeric user (appuser)" -> runAsUser: 10001 + Dockerfile `USER 10001:10001`
+- CrashLoopBackOff "redis Name or service not known" -> redis never deployed; `kubectl logs --previous`
+- api `0/1 Running` = readiness failing -> out of the Service, not restarted
+- k8s has no depends_on -> first-start "Connection refused" race; fix: restarts / retries / initContainer
+- Groq AuthenticationError -> bad key in Secret; check prefix + length, test with curl, `kubectl patch secret ... stringData`, rollout restart
+- Forgotten break-it (bad liveness path) = 73 restarts, 8h down unnoticed -> need monitoring + alerts
+- curl `000` = nothing listening (port-forward dead / stopped with Ctrl+C / wrong tab)
+- port-forward blocks its tab; it dies when the Mac sleeps or its pod is replaced
+- psql pager `(END)` -> q or `-P pager=off`
+- Helm "no template configmap.yaml associated" -> a template file was missing; check `ls -la templates/`
+- Helm lint "mapping values are not allowed" -> `image: repo:` with empty tag; quote template output, lint with --set image.tag
+
+### Concepts
+- Deployment (stateless) vs StatefulSet (stable name + own PVC) for databases
+- Headless Service (clusterIP: None) -> DNS straight to the pod
+- envFrom ConfigMap + Secret; env read only at pod start
+- Secrets are base64, NOT encrypted; never commit them
+- startupProbe (slow start) / livenessProbe (restart when dead) / readinessProbe (remove from traffic)
+- requests = scheduler reservation; over memory limit = OOMKilled (137); impossible request = Pending
+- maxUnavailable 0 + maxSurge 1 = zero-downtime rollout; a bad image keeps old pods serving
+- `rollout status / history / undo`; EndpointSlices = ready pods behind a Service
+- ingress-nginx retired March 2026 -> Gateway API: GatewayClass -> Gateway -> HTTPRoute (Envoy Gateway)
+- Gateway PROGRAMMED False on kind = no LoadBalancer; proxy works via port-forward
+- HPA needs metrics-server (kind: --kubelet-insecure-tls); target % is of the CPU request
+
+### Helm
+- Chart = templates + values; values.yaml < values-<env>.yaml < --set
+- `required` for image.tag (always the git SHA); Secrets stay outside the chart (existingSecret)
+- `{{- if not autoscaling.enabled }} replicas` -> no fight with the HPA
+- `checksum/config` annotation -> config change rolls pods automatically
+- `helm lint` (with real values), `helm template`, `install / upgrade / history / rollback / get values / list -A`
+- Rollback creates a NEW revision
+- `helm diff upgrade` before every prod upgrade
+- Helm can't adopt kubectl-created resources -> fresh namespaces
+- Same chart -> docmind-dev (1 replica, DEBUG) and docmind-prod (HPA, INFO)
+- Test zero downtime through the Gateway, not a port-forward to one pod
+
+### Recreate after a new cluster (no secret values in git)
+1. kind create cluster --config k8s/kind-config.yaml
+2. helm install eg oci://docker.io/envoyproxy/gateway-helm --version v1.9.2 -n envoy-gateway-system --create-namespace
+3. kubectl apply GatewayClass `eg` (from k8s/06-gateway.yaml)
+4. helm install metrics-server ... --set "args={--kubelet-insecure-tls}"
+5. kubectl create ns + secret docmind-secrets (POSTGRES_PASSWORD, DATABASE_URL, GROQ_API_KEY)
+6. helm install docmind helm/docmind -n <ns> -f values-<env>.yaml --set image.tag=<sha>

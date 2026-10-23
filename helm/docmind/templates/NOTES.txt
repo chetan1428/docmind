@@ -1,0 +1,6 @@
+DocMind deployed to namespace "{{ .Release.Namespace }}" (release "{{ .Release.Name }}", revision {{ .Release.Revision }}).
+Image: {{ include "docmind.image" . }}
+
+Test it:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/api 8000:80
+  open http://localhost:8000

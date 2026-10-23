@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: docmind-config
+  namespace: docmind
+data:
+  LLM_PROVIDER: "groq"
+  GROQ_MODEL: "openai/gpt-oss-120b"
+  GROQ_FAST_MODEL: "openai/gpt-oss-20b"
+  MAX_QUERY_REWRITES: "1"
+  EMBEDDING_PROVIDER: "hash"
+  REDIS_URL: "redis://redis:6379/0"
+  LOG_LEVEL: "INFO"

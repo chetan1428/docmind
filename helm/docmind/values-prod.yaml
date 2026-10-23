@@ -1,0 +1,11 @@
+api:
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 5
+config:
+  LOG_LEVEL: INFO
+postgres:
+  storage: 2Gi
+gateway:
+  hostname: docmind.localhost
